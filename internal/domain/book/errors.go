@@ -1,5 +1,4 @@
 package book
-
 import "errors"
 
 var (
