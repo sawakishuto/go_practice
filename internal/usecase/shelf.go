@@ -11,11 +11,11 @@ import (
 
 // ShelfService は蔵書まわりのユースケース（アプリケーションサービス）。
 type ShelfService struct {
-	repo book.Repository
+	repo Repository
 }
 
 // NewShelfService は ShelfService を構築する。
-func NewShelfService(repo book.Repository) *ShelfService {
+func NewShelfService(repo Repository) *ShelfService {
 	return &ShelfService{repo: repo}
 }
 

@@ -34,3 +34,16 @@ Phase 1 を終えると `go test ./...` と `go run ./cmd/shelf` が通る状態
 - **`go test` または `go build` の全文**
 
 を書いてもらえると答えやすいです。
+
+---
+
+## 今日の学び（2026-04-13）
+
+セッションで整理した内容を **テーマ別** に各ドキュメントへ追記しています。
+
+| テーマ | 追記先 |
+|--------|--------|
+| Phase 1 完了・Phase 2 カリキュラム、Step 5 の噛み砕き、用語表 | [docs/TRAINING.md](docs/TRAINING.md) |
+| `sync.WaitGroup`、`Test` 命名、`go test -race` と出力、`t.Parallel` の違い | [docs/TESTING.md](docs/TESTING.md) |
+| channel リポジトリの設計（係員／メッセージ）、Mutex との対比 | [docs/DESIGN.md](docs/DESIGN.md) |
+| `package main`、`:=` と `=`、channelrepo のコンストラクタと `Save` の役割 | [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) |

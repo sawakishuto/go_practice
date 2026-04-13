@@ -389,3 +389,13 @@ go test ./... -race
 go test ./... -cover
 go run ./cmd/shelf
 ```
+
+---
+
+## 今日の学び（2026-04-13）
+
+- **Phase 1 完了のまとめ:** `cmd/shelf` は **`package main`**。`go run ./cmd/shelf` は「main パッケージ」でないと実行できず、`not a main package` は宣言ミスが典型。
+- **Phase 2 の拡張:** フェーズ一覧と Step 4–5 に **goroutine・channel** を組み込んだ。並行テストは **`WaitGroup` + `go test -race`** をセットで考える。
+- **Step 5 の読みやすさ:** Phase 2 冒頭に **用語表**、各 Step に **「なぜ？」「やること」**、channel 版は **たとえ話（係員・窓口）** と **つまずき** を追記した。
+- **PR:** Phase 1 到達（`main` 追加）と Phase 2 手順の文書化を **1 PR** にまとめる形で整理した（リモートへの `push` / `gh pr create` は環境次第）。
+- **詳しい言語ルール・テストのコツ**は [TESTING.md](./TESTING.md) / [IMPLEMENTATION.md](./IMPLEMENTATION.md) の同日セクションへ分離した。

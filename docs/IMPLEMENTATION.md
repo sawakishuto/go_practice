@@ -199,3 +199,32 @@ go vet ./...
 - なぜこの分割か: [DESIGN.md](./DESIGN.md)
 - テストの書き方: [TESTING.md](./TESTING.md)
 - カリキュラム全体: [TRAINING.md](./TRAINING.md)
+
+---
+
+## 今日の学び（2026-04-13）
+
+### `cmd/shelf/main.go`
+
+- 実行可能にするには **`package main`** と **`func main()`** が必須。`package shelf` のままだと **`package ... is not a main package`** になる。
+
+### `id, err := f()` とそのあとの `err = g()`
+
+- **初回**は `:=` で `id` と `err` を**宣言**する。
+- すでに同じブロックに **`err` がある**なら、続きは **`err = ...`**（`:=` にすると「新しい変数が足りない」でコンパイルエラーになりやすい）。**`err` が `nil` かどうかは `=` / `:=` の選び理由ではない。**
+
+### channelrepo を書くときの役割分担
+
+| 場所 | やること |
+|------|----------|
+| **`NewChannelRepo`** | 仕事用 **`chan` を `make`** する → **係員を `go` で1回起動** → **`return`**（ここで **`Save` は呼ばない**）。`select` の無限ループは **係員側**。 |
+| **係員 goroutine** | **`for` + `select`** で `ops` から `request` を受け取り、**map だけを読み書き**し、**返信用 chan に結果を送る**。 |
+| **`Save` / `FindByID`** | 引数に channel は増やさない。内部で **返信用 chan を `make`（バッファ 1 推奨）** → **`ops <- req`** → **`select`** で返信と `ctx.Done()` を待つ。 |
+
+### よくあるつまずき
+
+- **`reqChan` を `go func` の中だけで `make` する**と、`Save` から送れず **係員とつながらない** → **`chan` は struct のフィールド**に持たせ、`New` で代入する。
+- **`case req := <-ch:` の中が空**だと、受け取っても **何もしない**。
+- **コンストラクタの最後で `<-ch` してブロック**すると **`return` できず**、呼び出し側が `Save` も呼べない。
+
+設計の全体像は [DESIGN.md](./DESIGN.md) の同日セクション。

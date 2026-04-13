@@ -144,3 +144,30 @@ go test ./... -cover
 - レイヤー分担: [DESIGN.md](./DESIGN.md)
 - ファイルの書き方: [IMPLEMENTATION.md](./IMPLEMENTATION.md)
 - 手順: [TRAINING.md](./TRAINING.md)
+
+---
+
+## 今日の学び（2026-04-13）
+
+### `sync.WaitGroup`
+
+- **`wg.Add(1)`** は `go` する**直前（親側）**で足す。子 goroutine の中だけ `Add` するとタイミングがずれやすい。
+- **`defer wg.Done()`** を各 `go func` の先頭付近で書き、**`wg.Wait()`** で「全員終わってから」検証する。`Wait()` のあとの処理は **子が `Done` したあと**にだけ走る（`err` が `nil` かどうかは無関係）。
+- **ループ変数**は `go func(i int) { ... }(i)` のように **引数で渡す**（クロージャが同じ `i` を共有しないように）。
+
+### テスト関数の名前
+
+- `go test` が実行するのは **`Test` で始まる**関数だけ。`multiAccessFromUser` のような名前は **未使用扱い**になる。→ **`TestMultiAccessFromUser`** のようにする。
+
+### `t.Fatal` / `t.Fatalf` と goroutine
+
+- **子 goroutine から `t.Fatalf` を直接呼ばない**方が安全。エラーは **Mutex でスライスに集める**、**バッファ付き err chan** などに溜め、**`Wait()` 後**にメインのテスト goroutine で `t.Fatal` する。
+
+### `go test ./... -race` と標準出力
+
+- **`-race` は `Println` を禁止しない。** 成功テストの出力を見やすくするなら **`-v`** を付ける。テスト向けには **`t.Log` / `t.Logf`** も使いやすい。
+
+### `t.Parallel()` との違い
+
+- **`t.Parallel()`** は **別のテスト関数同士**の並列化。
+- **1 つのテストの中で `go` を複数起動する**並行は **`WaitGroup`** 側の話。混同しない。

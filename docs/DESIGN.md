@@ -112,3 +112,19 @@ flowchart TB
 - 手を動かす順番: [TRAINING.md](./TRAINING.md)
 - テストの書き方: [TESTING.md](./TESTING.md)
 - ファイルごとの実装パターン: [IMPLEMENTATION.md](./IMPLEMENTATION.md)
+
+---
+
+## 今日の学び（2026-04-13）
+
+### channel ベースのインメモリ `Repository`（Phase 2 Step 5）
+
+- **設計の核:** **map（本の保管）は常に 1 本の goroutine（係員）だけが触る**。ほかは **channel で依頼と返事**だけ渡す（**actor／メッセージパッシング**に近い）。
+- **`ops chan request`:** 仕事のキュー。1 件の `request` に **操作の種類・データ・返信用の小さな chan** を載せる。係員は `select` / `for` で受け取り、map を更新したあと **`reply` に結果を送る**。
+- **公開 API:** `usecase.Repository`（`Save` / `FindByID`）の **シグネチャに channel は出さない**。channel は **アダプタ内部だけ**の実装詳細。
+- **コンストラクタ:** **`New...` はすぐ `return`**。ずっと channel を待つのは **`go` で起動した係員**であって、コンストラクタ本体ではない。
+- **Mutex:** `memory` の **Mutex 版**は map を複数 goroutine が触る前提で鍵をかける。**channel 版で map を係員だけが触るなら、map 用 Mutex は通常不要**（同じ map をメソッド内で直接触りつつ係員も触る、という二重構造は整理しづらい）。
+
+### ポートの置き場所（Phase 2 Step 1）
+
+- **interface を `usecase` 側に寄せる**練習では、永続化の約束は **ユースケースの近く**に置き、ドメインは **エンティティとエラー**に寄せる、という分け方を試す（[TRAINING.md](./TRAINING.md) Phase 2 参照）。上記ディレクトリ図は Phase 1 基準の説明として残し、移行後は `usecase` の `Repository` が窓口になるイメージで読み替える。
