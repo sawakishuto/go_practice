@@ -24,7 +24,7 @@
 | **6** | DB 永続化（`database/sql` など） |
 | **7** | 境界づけられたコンテキストでのパッケージ分割 |
 
-Phase 2 以降の詳細は、Phase 1 が **`go test ./...` 通過**してから読み進めてください（後半に同梱）。
+Phase 2 の詳細は **このファイルの「Phase 2」節**。Phase 3 以降の概要はその直後にあります。Phase 1 が **`go test ./...` 通過**してから Phase 2 に進んでください。
 
 ---
 
@@ -183,15 +183,81 @@ go run ./cmd/shelf
 
 ---
 
-## Phase 2 以降（概要）
+# Phase 2 — リポジトリ契約の切り離しとテーブル駆動テスト
 
-**Phase 2:** `Repository` interface を `usecase` 側に移してみるなど、**インターフェースの置き場所** を変えて同じテストが通るか試す。フェイク実装を別ファイルに切り出す。
+**到達目標**
 
-**Phase 3:** `Title` を `NewTitle(string) (Title, error)` で検証する値オブジェクトにする。
+- ユースケースのテストが **本物のインメモリ実装（`internal/adapter/memory`）** に直依存しないようにする。
+- **テーブル駆動テスト** でケースを増やしやすい形にする。
+
+**前提:** Phase 1 の `go test ./... -race` が通っていること。
+
+---
+
+## Step 1 — ユースケース側へ「ポート」を移す
+
+いま `book.Repository` はドメインパッケージにある。これを **ユースケースが永続化に求める契約** として `internal/usecase` に移してみる（型名は `BookRepository` など任意）。
+
+1. `internal/usecase` に、`*book.Book` と `context.Context` を使う **interface** を定義する（メソッドは Phase 1 の `Repository` と同等でよい）。
+2. `ShelfService` が保持・参照する型を、その **usecase 内の interface** に差し替える。
+3. `internal/domain/book` から `repository.go` を削除する（ドメインはエンティティとエラーに集中）。
+4. `internal/adapter/memory` の実装が新しい interface を満たすことを確認する。必要なら `var _ usecase.BookRepository = (*BookRepository)(nil)` のような **コンパイル時アサーション** を使う。
+
+**学ぶこと:** Go では interface はしばしば **利用側のパッケージ** に置く。ドメインに interface を置く設計との違いとトレードオフを体感する。
+
+**完了条件:** `go build ./...` が通る。
+
+---
+
+## Step 2 — テスト用フェイクを別ファイルへ
+
+`shelf_test.go` で `memory.NewBookRepository()` を使っている場合、**テスト専用のインメモリ実装**を `usecase` パッケージ内の別ファイル（例: `fake_book_repository_test.go`）に切り出す。
+
+- `shelf_test.go` から **`internal/adapter/memory` を import しない** 状態にする（ユースケースのテストが adapter に引っ張られないようにする）。
+- フェイク内の Mutex は、テストが単一 goroutine なら省略してもよい。
+
+**完了条件:** `go test ./internal/usecase/...` が緑。
+
+---
+
+## Step 3 — テーブル駆動テストへ寄せる
+
+次のいずれか（または両方）を行う。
+
+- **`internal/domain/book/book_test.go`:** `Borrow` / `Return` の成功・失敗パターンを、`[]struct { name string; ... }` と `for _, tt := range tests` でまとめる。
+- **`internal/adapter/memory/book_repository_test.go`:** 複数 ID や境界ケースをテーブルで追加する。
+
+**学ぶこと:** ケース追加が「struct の 1 要素」になると、差分レビューと命名（`t.Run(tt.name, ...)`）がしやすくなる。
+
+**完了条件:** `go test ./... -race` が緑。
+
+---
+
+## Step 4 — （任意）`t.Run` とエラー検証の整理
+
+`errors.Is` や `fmt.Errorf` の `%w` が意図どおりか、`t.Run` 単位で読み手が追えるようにテスト名やコメントを整える。
+
+---
+
+## Phase 2 修了条件
+
+```bash
+go test ./... -race
+```
+
+すべて緑で Phase 2 完了。次は **Phase 3（値オブジェクト）** に進む（概要は下記）。
+
+---
+
+## Phase 3 以降（概要）
+
+**Phase 3:** `Title` を `NewTitle(string) (Title, error)` で検証する値オブジェクトにする。アダプタでの入出力変換を足す。
+
+**Phase 4:** ドメインイベント（任意）。
 
 **Phase 5 以降:** HTTP 層を `internal/adapter/http` に追加し、DTO からユースケースへ変換する。
 
-（詳細は Phase 1 完了後に、このファイルへ追記するか、別ドキュメントに分けてもよい。）
+**Phase 6–7:** DB 永続化、境界づけられたコンテキストでのパッケージ分割（フェーズ一覧表を参照）。
 
 ---
 
