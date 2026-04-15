@@ -128,6 +128,22 @@ flowchart TB
 - **長所:** 「誰が map を触るか」が 1 箇所に集約され、データ競合の構造的理由が減る。設計を説明しやすい（窓口と裏方の比喩）。
 - **短所:** 型（`request`）や `select` が増え、行数は増えがち。**終了（shutdown）** と **goroutine リーク**をきちんと設計しないとテストや `main` で残りやすい。
 
+#### 依頼 struct と「仕事用 channel」「返信用 channel（`errCh` など）」の対応関係
+
+次の二層に分けると整理しやすいです（実装例は `internal/adapter/memory/channelrepo`）。
+
+1. **依頼のための struct（例: `request`）**  
+   **1 件分の仕事**を表す。中身はたとえば **操作種別**（保存／取得）、**ペイロード**（`*Book` や `id`）、そして **呼び出し元へ結果を返すための channel**（保存なら `errCh chan error`、取得なら `findCh chan findResult` など）のフィールドをまとめたもの。
+
+2. **仕事用 channel（例: `ops chan request`）**  
+   **係員へのトレー**に相当する。`Save` を呼んだ goroutine は **`request` struct を組み立てて `ops` に送る**だけで、**自分では map を触らない**。
+
+**`errCh` は何のためか:** 「この `Save` 呼び出し**専用**の、係員から呼び出し元への**返信用の短い管**」です。`Save` メソッドの先頭で **`errCh := make(chan error, 1)`** のように **呼び出しごとに新規作成**し、そのポインタを **`request` に埋め込んでから `ops` に送る**形が多いです（[IMPLEMENTATION.md](./IMPLEMENTATION.md) §9.2.1）。
+
+**「`errCh` に入ったことを検知して次の処理」という理解について:** イベントキューを「監視」するというより、**呼び出し側の goroutine が `err := <-errCh` でブロックし、係員が `req.errCh <- nil`（またはエラー）した瞬間に受信が完了して、**その次の行（たとえば `return err`）に進む**、という **同期の待ち合わせ**です。係員側は **`req` の中身を見て**どの `errCh`／`findCh` に送るべきかが分かります。
+
+**`FindByID` が `errCh` ではなく `findCh` を使う理由:** 返したい型が **`(*Book, error)` の二つ**なので、**エラーだけの channel では足りず**、`findResult{ b, err }` のような struct を載せた channel で **まとめて返す**パターンになります（思想は `errCh` と同じ「依頼ごとの返信管」）。
+
 ### 8.3 公開 API に channel を出さない理由
 
 `ShelfService` やテストが見るのは **`Save(ctx, b) error` / `FindByID(ctx, id)`** のような **同期っぽいメソッド**のままにします。channel は **アダプタ内部の実装詳細**に閉じ込めます。

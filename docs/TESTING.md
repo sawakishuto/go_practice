@@ -156,6 +156,12 @@ func TestSomething(t *testing.T) {
 
 成功時だけの並行負荷なら、**件数や最終状態**だけ `Wait()` 後に検証してもよいです。
 
+### 6.6 channel 版リポジトリと「依頼 struct / `errCh`」（テストで意識すること）
+
+`internal/adapter/memory/channelrepo` のように **係員 goroutine + `ops chan request`** で map を守る実装では、`Save` の外側から見ると **普通の同期メソッド**です。内部では **依頼 struct** に **`errCh` などの返信用 channel を埋め込み**、`ops` に送ったあと **`<-errCh` で係員からの返事までブロック**します（「`errCh` を別ループが監視している」のではなく、**同じ呼び出し goroutine が受信で待つ**」点は [DESIGN.md](./DESIGN.md) §8.2 の補足、[IMPLEMENTATION.md](./IMPLEMENTATION.md) §9.2.1）。
+
+並行テストでは **`WaitGroup` は「複数のクライアント `go` が一通り終わったか」**の同期に使い、**各 `Save` 内の `errCh` は呼び出しごとに作り捨て**であることは別レイヤです。`-race` は **係員と複数クライアント**のあいだのデータ競合がないかも含めて炙ります。
+
 ---
 
 ## 7. `t.Parallel()` と「テスト内の `go`」の使い分け

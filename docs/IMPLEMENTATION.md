@@ -284,7 +284,26 @@ func main() {
 
 - **操作種別**（`iota` や文字列で「保存」「取得」）。
 - **ペイロード**（保存なら `*book.Book`、取得なら `id string`）。
-- **返信先**（例: `errReply chan error`、`findReply chan findResult`）。係員は処理後に **一度だけ送る**。
+- **返信先**（例: `errCh chan error`、`findCh chan findResult`）。係員は処理後に **一度だけ送る**。
+
+### 9.2.1 `Save` と `errCh` — 誰がいつ何を待つか（対話で出た疑問の整理）
+
+**「リクエスト用の struct と、リクエストを送り合う channel があるのか」** … **そのとおり**です。ただし channel は **2 種類**に分かれます。
+
+| channel | 役割 | 誰が `make` するか |
+|---------|------|-------------------|
+| **`ops chan request`（例）** | 係員に **依頼 struct そのもの**を届ける **仕事用キュー** | コンストラクタ（`ChannelRepo` のフィールドとして 1 本だけ） |
+| **`errCh chan error`（例）** | **この `Save` 呼び出し一回分**の「結果（成功なら `nil`）だけ」を係員から呼び出し元へ返す **返信専用** | **`Save` メソッド内**で毎回 `make(chan error, 1)` |
+
+**流れ（`Save` が成功するとき）:**
+
+1. 呼び出し側 goroutine が `errCh` を作り、`request{ kind: 保存, book: b, errCh: errCh }` を組み立てる。  
+2. **`r.ops <- req`** で依頼を係員のキューに載せる（ここで一度 `select` し、`ctx.Done()` と併用することも多い）。  
+3. 係員 goroutine が `<-ops` で `req` を受け取り、**map を更新**する。  
+4. 係員が **`req.errCh <- nil`** する（失敗パスを設けているならエラー値を送る）。  
+5. まだ同じ呼び出し側 goroutineが **`case err := <-errCh:`** で待っているので、受信が完了し **`return err`** に進む。
+
+**「`errCh` に入ったことを検知して次の処理」**という言い方について: **コールバックやウォッチャが `errCh` を監視している**のではなく、**普通の関数呼び出しの流れのなかで、`<-errCh` がブロック解除されるまで次に進まない**、という **同期 API の内部実装**です。`FindByID` は戻り値が二つなので **`findCh chan findResult`** のように **結果用の struct を載せた channel** にすることが多い（[DESIGN.md](./DESIGN.md) §8.2 の直後の補足）。
 
 ### 9.3 コンストラクタでやってはいけないこと
 
@@ -296,7 +315,7 @@ func main() {
 
 1. `switch req.kind` などで分岐。  
 2. **map を読み書き**（この goroutine だけが触る）。  
-3. **`req.errReply <- nil` や `req.findReply <- findResult{...}`** で返す。  
+3. **`req.errCh <- nil` や `req.findCh <- findResult{...}`** で返す（フィールド名は実装に合わせる）。  
 4. ループの先頭に戻り、**次の依頼を待つ**。
 
 `case req := <-ch:` の **中身が空**のままだと、依頼は消化されず **呼び出し側が `<-reply` で永遠に待つ**などの不具合になります。
