@@ -17,6 +17,7 @@
 | Mutex 版と channel 版、actor／コンストラクタと係員、ポートをドメイン／ユースケースのどちらに置くか | [DESIGN.md](./DESIGN.md) §8〜§10 |
 | テスト内の `go` と `WaitGroup`、`t.Parallel` との違い、`-v` と `-race`、子 goroutine と `t.Fatal` | [TESTING.md](./TESTING.md) §5〜§9 |
 | `cmd/shelf` の `package main`、`:=` / `=`、channel ベースリポジトリの実装チェックリスト | [IMPLEMENTATION.md](./IMPLEMENTATION.md) §7〜§9 |
+| ドメインイベント・イベントソーシング・MQ の用語とトレードオフ | [EVENTS.md](./EVENTS.md) |
 
 ---
 
@@ -27,12 +28,12 @@
 | **1** | ドメインモデル・ユースケース・インメモリ永続化・`main`（このドキュメントで手順どおりに自作） |
 | **2** | ポートの切り出し、テーブル駆動テスト、**goroutine / channel** による並行アクセスの実践 |
 | **3** | 値オブジェクト（`Title` など）、アダプタでの入出力変換 |
-| **4** | ドメインイベント（任意） |
+| **4** | **ドメインイベント**、**イベントストア（追記・リプレイ）**、**メッセージ流し（インメモリ MQ 代用）**（[EVENTS.md](./EVENTS.md) と併読） |
 | **5** | HTTP API（`net/http` または `chi`） |
 | **6** | DB 永続化（`database/sql` など） |
 | **7** | 境界づけられたコンテキストでのパッケージ分割 |
 
-Phase 2 の詳細は **このファイルの「Phase 2」節**。Phase 3 の詳細は **「Phase 3」節**。Phase 4 以降の概要はその次にあります。Phase 1 が **`go test ./...` 通過**してから Phase 2、Phase 2 修了後に Phase 3 へ進んでください。
+Phase 2 の詳細は **「Phase 2」節**、Phase 3 は **「Phase 3」節**、Phase 4 は **「Phase 4」節**。概念の背景は **[EVENTS.md](./EVENTS.md)**。Phase 1 が **`go test ./...` 通過**してから Phase 2 → Phase 3 → Phase 4 の順がおすすめです。
 
 ---
 
@@ -463,17 +464,175 @@ go test ./... -race
 go run ./cmd/shelf
 ```
 
-すべて緑・期待どおりなら Phase 3 完了。次は **Phase 4（ドメインイベント、任意）** または **Phase 5（HTTP）** の概要に進む。
+すべて緑・期待どおりなら Phase 3 完了。次は **Phase 4** に進む（開始前に **[EVENTS.md](./EVENTS.md)** を一通り読むことを推奨）。
 
 ---
 
-## Phase 4 以降（概要）
+# Phase 4 — ドメインイベント、イベントストア、メッセージ流し
 
-**Phase 4:** ドメインイベント（任意）。
+**到達目標**
 
-**Phase 5 以降:** HTTP 層を `internal/adapter/http` に追加し、**DTO（JSON）の `string` → `NewTitle` など**をアダプタで行い、ユースケースにはすでに検証済みの型を渡す（Phase 3 でユースケースに置いた変換を **外に移す**比較ができる）。
+1. **ドメインイベント**を型で表し、**コマンド成功後**に発行できるようにする。
+2. **追記専用のイベントストア**（インメモリ）に載せ、**リプレイ**で `Book` の状態を再構築できるようにする。
+3. **メッセージキューの代用**として、**channel + goroutine** の購読者にイベントを流し、**少なくとも 1 回届く**前提の処理を書く（冪等性のコメント付き）。
 
-**Phase 6–7:** DB 永続化、境界づけられたコンテキストでのパッケージ分割（フェーズ一覧表を参照）。
+**前提:** Phase 3 修了（`go test ./... -race` が緑）。  
+**併読:** [EVENTS.md](./EVENTS.md)（用語・トレードオフ・本番でのアウトボックス）。
+
+---
+
+## Step 0 — 用語を自分の言葉にする
+
+[EVENTS.md](./EVENTS.md) の §1〜§5 を読み、次を **メモに 1〜2 文ずつ**書く（リポジトリにコミットしなくてよい）。
+
+- コマンドとイベントの違い
+- イベント駆動とイベントソーシングの違い
+- at-least-once と冪等性
+
+**完了条件:** Phase 4 のコードに着手してよいと自分で判断できること。
+
+---
+
+## Step 1 — イベント型をドメインに定義する
+
+ファイル: `internal/domain/book/shelf_event.go`（名前は任意だが **`event.go` だけだと紛らわしい**ので避けてもよい）
+
+次のような **過去形の事実**を表す struct を **最低 2 種類**（推奨 3 種類）定義する。
+
+- 例: **`BookRegistered`**（本 ID・タイトル文字列または `Title` の表現・著者・発生時刻）
+- 例: **`BookBorrowed`**（本 ID・発生時刻）
+- 例: **`BookReturned`**（本 ID・発生時刻）
+
+**設計の選択（どちらか一貫）:**
+
+- **A:** `time.Time` をフィールドに持つ（`time` をドメインに import してよいかチーム方針で決める）。
+- **B:** 発生時刻は **ユースケースが付与**し、イベントは **事実のペイロードだけ**（Phase 4 では B でもよい）。
+
+**完了条件:** `go build ./internal/domain/book/...` が通る。
+
+---
+
+## Step 2 — イベントの和型（判別しやすい形）
+
+**目的:** `Publish(any)` のように **型が消える**のを避け、テストと `switch` で扱いやすくする。
+
+次のいずれかを採用する（ドキュメントに例を書いた sealed interface でも、**`Kind` 列挙 + `Payload` 用フィールド**でもよい）。
+
+1. **インターフェース + 小文字のマーカーメソッド**（export されないので **パッケージ外では実装できない**）  
+   例: `type ShelfEvent interface { shelfEvent() }` と各イベントが `func (*BookBorrowed) shelfEvent() {}`。
+2. **`type EventKind int` + `struct { Kind EventKind; Registered *BookRegistered; Borrowed *BookBorrowed; ... }`** の **判別共用体風**（1 つだけ非 nil）。
+
+**完了条件:** `go test ./internal/domain/book/...` が緑（イベント型だけのテストを足してもよい）。
+
+---
+
+## Step 3 — ユースケース成功後にイベントを組み立てる
+
+ファイル: `internal/usecase/shelf.go`（および必要なら **新ファイル** `internal/usecase/shelf_events.go`）
+
+- **`RegisterBook` / `BorrowBook` / `ReturnBook`** の **成功パス**の最後（`Save` が成功したあと）で、対応する **ドメインイベント struct** を組み立てる。
+- まだ **どこにも送らなくてよい**。`// TODO: publish` でも、次 Step の **フィールド**に渡すでもよい。
+
+**学ぶこと:** **コマンドの結果**として「何が起きたか」を **明示的なデータ**にする。
+
+**完了条件:** 既存の `go test ./internal/usecase/...` が緑。
+
+---
+
+## Step 4 — `EventPublisher` ポートと記録用実装
+
+**ポート（interface）** を定義する（置き場所は **`internal/usecase`** が無難。名前例: `EventPublisher`）。
+
+```text
+Publish(ctx context.Context, ev book.ShelfEvent) error
+```
+
+（`ShelfEvent` は Step 2 のインターフェース名に合わせてよい。）
+
+**インメモリ実装（テスト・本番兼用でもよい）:**
+
+- `internal/adapter/memory` または `internal/adapter/eventlog` に **`RecordingPublisher`**（**スライスに append** するだけ、`Mutex` で保護）。
+- **`ShelfService` が `EventPublisher` をオプションで受け取る**（`nil` なら何もしない）か、**必須フィールド**にするかは選択。学習では **必須 + テストで Recording** が分かりやすい。
+
+**テスト:** `BorrowBook` 成功後に **`RecordingPublisher` に `BookBorrowed` が 1 件**残ることを検証する。
+
+**完了条件:** `go test ./... -race` が緑。
+
+---
+
+## Step 5 — イベントストア（追記・読出し）
+
+**ポート:** 例として次を満たす interface（名前は任意）。
+
+- **`Append(ctx, streamID string, expectedVersion int, ev ...book.ShelfEvent) error`**  
+  - **楽観ロック:** `expectedVersion` がストアの現在バージョンと一致しなければ **エラー**（競合検出の練習。単一 goroutine だけなら **常に一致**でもよいが、**引数の意味**をテストで固定する）。
+- **`Load(ctx, streamID string) ([]book.ShelfEvent, int, error)`** … イベント列と **現在バージョン**。
+
+**インメモリ実装:** `map[string][]book.ShelfEvent` + `map[string]int` または **スライス長でバージョン**。
+
+**ユースケースの流れ（例）:**
+
+1. `Load` で現在のイベント列とバージョンを得る（新規なら空と `-1` など、**ルールを決める**）。
+2. コマンドを **現在の状態に対して**実行（いままで通り `FindByID` → `Borrow` → `Save`）。
+3. 新イベントを **`Append`（期待バージョン付き）**。
+4. **`Publish`**（失敗時の扱い: ログだけ／エラーを返す、を決める）。
+
+**完了条件:** **追記 → 再 `Load` して件数が増える**テストが緑。`go test ./... -race` が緑。
+
+---
+
+## Step 6 — リプレイ（イベントから状態を再構築）
+
+ファイル: `internal/domain/book` または `internal/usecase`（どちらに置くか **README かコメントで一行**理由を書く）
+
+- **純関数に近い** `Apply(events []book.ShelfEvent) (*Book, error)` または **`Reduce`**  
+  - `BookRegistered` 相当から **`NewBook` 相当の状態**を作る。
+  - その後 `BookBorrowed` / `BookReturned` を順に適用して **貸出状態が再現される**ことを確認する。
+- **不正な順序**（未登録の `BookBorrowed` など）なら **エラー**にしてもよい。
+
+**テスト:** イベント列を **手で組み立て** → `Apply` → `IsAvailable()` などが期待どおり。
+
+**完了条件:** `go test ./... -race` が緑。
+
+---
+
+## Step 7 — メッセージキュー「代用」（channel + コンシューマ）
+
+**目的:** **publish と処理を別 goroutine** に分け、**配信が遅延・重複しうる**世界に近づける。
+
+1. **`internal/adapter/bus` など**に、`EventPublisher` を実装する型を置く。
+2. 内部で **`chan book.ShelfEvent`（バッファあり推奨）** と **コンシューマ goroutine**（`for ev := range ch`）を持つ。
+3. **`Publish` は channel に送るだけ**で早く返す（**非同期**）。バッファが満杯なら **ブロック**する点に注意。
+4. コンシューマ側で **`Handler func(context.Context, book.ShelfEvent)`** を 1 件ずつ呼ぶ（**冪等**: 同じイベントが 2 回来ても壊れないように **コメントまたは簡単な重複検知**を書く）。
+
+**テスト:** `Publish` を複数回 → コンシューマが **受け取った件数**を `sync.WaitGroup` で待って検証。`-race` 付き。
+
+**完了条件:** `go test ./... -race` が緑。
+
+---
+
+## Step 8 — （任意）本番 MQ・アウトボックス
+
+- **RabbitMQ / NATS / Redis Streams / SQS** などは **このリポジトリでは必須にしない**。ローカルで試す手順を **自分用メモ**や **別 README** に書くだけで Phase 4 としては十分。
+- **Transactional Outbox** は [EVENTS.md](./EVENTS.md) §5.5。DB 実装が入った **Phase 6** のあとに読み直すと実感がつきやすい。
+
+---
+
+## Phase 4 修了条件
+
+```bash
+go test ./... -race
+```
+
+次は **Phase 5（HTTP）**（DTO と値オブジェクトの境界）へ。イベントを **Webhooks で外向きに出す**などは Phase 5 以降の伸ばししろとする。
+
+---
+
+## Phase 5 以降（概要）
+
+**Phase 5:** HTTP 層を `internal/adapter/http` に追加し、**DTO（JSON）の `string` → `NewTitle` など**をアダプタで行い、ユースケースにはすでに検証済みの型を渡す。必要なら **重要なドメインイベントを Webhook / 外向きキューに publish** する設計を検討する。
+
+**Phase 6–7:** DB 永続化、境界づけられたコンテキストでのパッケージ分割（フェーズ一覧表を参照）。**イベントストアと DB を同一トランザクションに載せる**などはここで現実味が出る。
 
 ---
 
