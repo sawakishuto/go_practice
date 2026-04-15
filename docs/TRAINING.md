@@ -541,20 +541,58 @@ go run ./cmd/shelf
 
 ## Step 4 — `EventPublisher` ポートと記録用実装
 
-**ポート（interface）** を定義する（置き場所は **`internal/usecase`** が無難。名前例: `EventPublisher`）。
+### この Step のゴール（何ができたら終わりか）
+
+**`ShelfService` が「イベントを外に出すための一本の口」として `EventPublisher` を持ち、**成功したコマンドのあと**に `Publish` が呼ばれる。**テストでは **`RecordingPublisher`** に溜まった中身を読み取り、**`BorrowBook` 成功で `BookBorrowed` が 1 件**あることを確認できる。
+
+---
+
+### 用語整理（struct か func か interface か）
+
+| 名前 | Go では何か | 置き場所の例 | 役割 |
+|------|-------------|--------------|------|
+| **`EventPublisher`** | **`interface` 型**（メソッド集合の契約） | `internal/usecase`（例: `event_publisher.go`） | ユースケース側の **ポート**。「イベントを渡せばよい」だけを知り、**誰が届けるか（MQ・ログ・メモリ）は知らない**。 |
+| **`RecordingPublisher`** | **`struct` + メソッド**（`Publish` を実装） | `internal/adapter/eventlog` または `internal/adapter/memory` | **インメモリの受け皿**。届いた `book.ShelfEvent` を **スライスに `append`**。複数 goroutine から叩くなら **`sync.Mutex`** でスライスを守る。 |
+| **`Publish` だけの `func` 型** | `type X func(ctx context.Context, ev book.ShelfEvent) error` のような **関数型** | ポートとしては **非推奨（最初から避けてよい）** | クロージャでテストは書きやすいが、**状態（溜めたイベント）＋ Mutex** を同じパターンで表しづらい。学習では **interface + struct** に寄せる。 |
+
+メソッドシグネチャの例（`ShelfEvent` の名前は **Step 2 で決めた和型**に合わせる）:
 
 ```text
 Publish(ctx context.Context, ev book.ShelfEvent) error
 ```
 
-（`ShelfEvent` は Step 2 のインターフェース名に合わせてよい。）
+Go には `implements` キーワードがない。**具体型が上記メソッドを持てば**、その型の値は **`EventPublisher` として渡せる**（ダックタイピング）。
 
-**インメモリ実装（テスト・本番兼用でもよい）:**
+---
 
-- `internal/adapter/memory` または `internal/adapter/eventlog` に **`RecordingPublisher`**（**スライスに append** するだけ、`Mutex` で保護）。
-- **`ShelfService` が `EventPublisher` をオプションで受け取る**（`nil` なら何もしない）か、**必須フィールド**にするかは選択。学習では **必須 + テストで Recording** が分かりやすい。
+### やること（順番付きチェックリスト）
 
-**テスト:** `BorrowBook` 成功後に **`RecordingPublisher` に `BookBorrowed` が 1 件**残ることを検証する。
+1. **ポートをファイルに書く**  
+   - 例: `internal/usecase/event_publisher.go` に `type EventPublisher interface { Publish(ctx context.Context, ev book.ShelfEvent) error }` を定義する。
+
+2. **記録用アダプタを struct で実装する**  
+   - パッケージ例: `internal/adapter/eventlog`（名前は任意。`memory` に置いてもよい）。  
+   - **`RecordingPublisher` は `struct`** とし、フィールドに **`sync.Mutex`** と **`[]book.ShelfEvent`（または `[]*...`、方針を一つに）** を持つ。  
+   - **`Publish` メソッド**: Lock → `append` → Unlock。返り値の `error` はこの段階では **`nil` 固定**でよい。  
+   - テストで中身を検証するなら、**スライスをそのまま返さず** `copy` した **`Events() []book.ShelfEvent` など**を用意すると安全（呼び出し側が溜め場を書き換えないため）。
+
+3. **`ShelfService` に配線する**  
+   - `ShelfService` に **`EventPublisher` 型のフィールド**を足す。  
+   - **`NewShelfService(repo, publisher EventPublisher)`** のようにコンストラクタで **必ず受け取る**形が学習では分かりやすい（**推奨**）。  
+   - **オプション案:** `publisher` が `nil` のときだけ `Publish` を呼ばない。**デメリット**は「忘れて `nil` が流れる」とイベントが静かに消えること。**必須案**でイベントを捨てたいときは、**何もしない `Publish` を持つ struct**（例: `NoOpEventPublisher`）を明示的に渡す。
+
+4. **Step 3 で組み立てたイベントを、実際に `Publish` する**  
+   - `RegisterBook` / `BorrowBook` / `ReturnBook` それぞれで、**`repo.Save` が成功した直後**に `s.publisher.Publish(ctx, その操作に対応するイベント)` を呼ぶ。  
+   - Step 3 で `// TODO: publish` のままなら、この Step で **TODO を消して**呼び出しに置き換える。
+
+5. **`cmd/shelf` の組み立てを直す**  
+   - `NewShelfService` の引数が増えるので、**`main` で `NoOp` か `Recording` のどちらを渡すか**を決める（本番でログに出さないなら `NoOp` が無難）。
+
+6. **テストを書く（この Step の受け入れ条件）**  
+   - `RecordingPublisher` を注入した `ShelfService` で **`RegisterBook` → `BorrowBook` が成功**したあと、記録されたイベント列を走査し、**`*book.BookBorrowed` がちょうど 1 件**であることを検証する（型アサーションまたは `switch`）。  
+   - フロー全体のテストでは **`NoOp`** を渡して既存の振る舞いを保ってもよい。
+
+**補足（パッケージの向き）:** `adapter` が `usecase` を import すると、**`usecase` のテストから `adapter` を import したときに import サイクル**になりやすい。`RecordingPublisher` 本体は **`usecase` に依存しない**（`book.ShelfEvent` と `context` だけ）に寄せると安全。インターフェース実装の検証がしたければ、**`package eventlog_test` の `*_test.go`** で `var _ usecase.EventPublisher = (*eventlog.RecordingPublisher)(nil)` のように書く手もある。
 
 **完了条件:** `go test ./... -race` が緑。
 
