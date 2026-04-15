@@ -3,16 +3,15 @@ package book
 import "time"
 
 type BookRegistered struct {
-	id string
-	title Title
-	author string
-	occurredAt time.Time
+	ID         string
+	Title      Title
+	Author     string
+	OccurredAt time.Time
 }
 
 type BookBorrowed struct {
-	id string
-	occurredAt time.Time
-
+	ID         string
+	OccurredAt time.Time
 }
 
 type ShelfEvent interface {
