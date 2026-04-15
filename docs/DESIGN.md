@@ -184,3 +184,4 @@ flowchart TB
 - 手を動かす順番: [TRAINING.md](./TRAINING.md)
 - テストの書き方: [TESTING.md](./TESTING.md)
 - ファイルごとの実装パターン: [IMPLEMENTATION.md](./IMPLEMENTATION.md)
+- ドメインイベント・イベントソーシング・MQ: [EVENTS.md](./EVENTS.md)（Phase 4 と併読）
