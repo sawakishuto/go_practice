@@ -129,6 +129,7 @@ func NewShelfService(repo book.Repository) *ShelfService {
 }
 ```
 
+- 上記は **Phase 1 の最小形**。Phase 4 で `EventPublisher` を足す場合は **§6.5** を参照する。
 - 各操作は **`func (s *ShelfService) RegisterBook(...)`** のようにメソッドにする。毎回 `repo` を引数で渡す **パッケージ関数**でも動くが、**依存が増えたときに拡張しづらい**。
 - **ポートの型**を `book.Repository` にするか `usecase.BookRepository` にするかは [DESIGN.md](./DESIGN.md) §10 のトレードオフ参照。
 
@@ -165,6 +166,43 @@ return hex.EncodeToString(buf), nil
 1. `b, err := s.repo.FindByID(ctx, bookID)` → `err != nil` なら return。
 2. `err = b.Borrow()` または `Return()` → `err != nil` なら return。
 3. `return s.repo.Save(ctx, b)`。
+
+### 6.5 Phase 4: EventPublisher と RecordingPublisher（追加）
+
+Phase 1 の例では `NewShelfService(repo)` のみだったが、Phase 4 Step 4 では **第 2 引数で `EventPublisher` を渡す**形になる（[TRAINING.md](./TRAINING.md) Step 4、および **「Phase 4 学びの記録」**）。
+
+**`ShelfService` のフィールド例:**
+
+```go
+type ShelfService struct {
+    repo      Repository      // 既存
+    publisher EventPublisher  // 追加（ポートは usecase 側で定義）
+}
+```
+
+**コンストラクタ例（学習向け・必須注入）:**
+
+```go
+func NewShelfService(repo Repository, publisher EventPublisher) *ShelfService {
+    return &ShelfService{repo: repo, publisher: publisher}
+}
+```
+
+**`cmd/shelf` の組み立て例（イベントを捨てる）:**
+
+```go
+svc := usecase.NewShelfService(repo, usecase.NoOpEventPublisher{})
+```
+
+**`Publish` の呼び出し位置:** 各メソッドで **`repo.Save` が成功した直後**に `s.publisher.Publish(ctx, ev)`。`ev` は Step 3 で組み立てた `*book.BookRegistered` など。
+
+**`RecordingPublisher`（adapter）側の注意:**
+
+- **`Publish` のシグネチャはポートと同一**にする。例: `func (p *RecordingPublisher) Publish(ctx context.Context, ev book.ShelfEvent) error`。`ctx` を付け忘れると **`EventPublisher` を実装していない**ことになる。  
+- テストで中身を検証するなら **`Events()` でコピーを返す**など、スライスを外部にそのまま露出しない方が安全（[TRAINING.md](./TRAINING.md) Step 4 本文）。  
+- **よくあるバグ:** イベント struct は組み立てているが **`Publish` を呼んでいない**／`fmt.Errorf(...)` を **`return` せずに捨てている`**／`NewTitle` 失敗時のラップ文字列が **`usecase: id`** のままなど、文脈と実装がずれる。
+
+**import サイクル:** `internal/adapter/eventlog` の本体は **`usecase` を import しない**方が、`usecase` のテストから `eventlog` を import しやすい。インターフェース実装の検証は **`package eventlog_test`** のテストで `var _ usecase.EventPublisher = (...)` と書く手がある（[TRAINING.md](./TRAINING.md) Step 4 補足）。**`eventlog` 本体で `var _ usecase.EventPublisher` と `usecase` を import すると** `import cycle not allowed in test` になりうる、という具体例は [TRAINING.md](./TRAINING.md) **Phase 4 学びの記録 §6** にまとめてある。
 
 ---
 
@@ -218,7 +256,7 @@ package github.com/.../cmd/shelf is not a main package
 func main() {
     ctx := context.Background()
     repo := memory.NewBookRepository()
-    svc := usecase.NewShelfService(repo)
+    svc := usecase.NewShelfService(repo, usecase.NoOpEventPublisher{}) // Phase 4 以降は publisher を渡す
     id, err := svc.RegisterBook(ctx, "タイトル", "著者")
     // err チェック、BorrowBook、ReturnBook、fmt.Println / log
 }
