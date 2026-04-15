@@ -25,7 +25,13 @@ func (s *ShelfService) RegisterBook(ctx context.Context, title, author string) (
 	if err != nil {
 		return "", fmt.Errorf("usecase: id: %w", err)
 	}
-	b := book.NewBook(id, title, author)
+	t, err := book.NewTitle(title)
+	if err != nil {
+		return "", fmt.Errorf("usecase: id: %w", err)
+
+	}
+
+	b := book.NewBook(id, t, author)
 	if err := s.repo.Save(ctx, b); err != nil {
 		return "", err
 	}
