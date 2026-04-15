@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"time"
 
 	"github.com/sawakishuto/go_practice/internal/domain/book"
 )
@@ -35,6 +36,12 @@ func (s *ShelfService) RegisterBook(ctx context.Context, title, author string) (
 	if err := s.repo.Save(ctx, b); err != nil {
 		return "", err
 	}
+	event := &book.BookRegistered{
+		ID:         b.ID(),
+		Title:      b.Title(),
+		Author:     b.Author(),
+		OccurredAt: time.Now(),
+	}
 	return b.ID(), nil
 }
 
@@ -47,7 +54,17 @@ func (s *ShelfService) BorrowBook(ctx context.Context, bookID string) error {
 	if err := b.Borrow(); err != nil {
 		return err
 	}
-	return s.repo.Save(ctx, b)
+
+	err = s.repo.Save(ctx, b)
+	if err != nil {
+		fmt.Errorf("Save error")
+		return err
+	}
+	event := &book.BookBorrowed{
+		ID:         b.ID(),
+		OccurredAt: time.Now(),
+	}
+	return nil
 }
 
 // ReturnBook は指定 ID の本を返却する。

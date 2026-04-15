@@ -16,7 +16,7 @@ func NewBook(id string, title Title, author string) *Book {
 }
 
 func (b *Book) ID() string     { return b.id }
-func (b *Book) Title() string  { return b.title.Title() }
+func (b *Book) Title() Title   { return b.title }
 func (b *Book) Author() string { return b.author }
 
 // IsAvailable は貸出可能かどうか。
