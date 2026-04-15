@@ -11,11 +11,11 @@ import (
 
 // ShelfService は蔵書まわりのユースケース（アプリケーションサービス）。
 type ShelfService struct {
-	repo book.Repository
+	repo Repository
 }
 
 // NewShelfService は ShelfService を構築する。
-func NewShelfService(repo book.Repository) *ShelfService {
+func NewShelfService(repo Repository) *ShelfService {
 	return &ShelfService{repo: repo}
 }
 
@@ -25,7 +25,13 @@ func (s *ShelfService) RegisterBook(ctx context.Context, title, author string) (
 	if err != nil {
 		return "", fmt.Errorf("usecase: id: %w", err)
 	}
-	b := book.NewBook(id, title, author)
+	t, err := book.NewTitle(title)
+	if err != nil {
+		return "", fmt.Errorf("usecase: id: %w", err)
+
+	}
+
+	b := book.NewBook(id, t, author)
 	if err := s.repo.Save(ctx, b); err != nil {
 		return "", err
 	}

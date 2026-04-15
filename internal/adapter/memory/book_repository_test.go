@@ -1,14 +1,20 @@
 package memory
 
 import (
-	"testing"
 	"context"
+	"testing"
+
 	"github.com/sawakishuto/go_practice/internal/domain/book"
 )
 
 func TestBookRepository_Save_and_FindByID(t *testing.T) {
 
-	book := book.NewBook("1", "The Great Gatsby", "F. Scott Fitzgerald")
+	var title, err = book.NewTitle("スコットランド")
+	if err != nil {
+		t.Fatalf("book title is invalid")
+	}
+
+	book := book.NewBook("1", title, "F. Scott Fitzgerald")
 	if book == nil {
 		t.Errorf("Expected non-nil book, got nil")
 	}
@@ -16,7 +22,7 @@ func TestBookRepository_Save_and_FindByID(t *testing.T) {
 	if repo == nil {
 		t.Errorf("Expected non-nil repository, got nil")
 	}
-	err := repo.Save(context.Background(), book)
+	err = repo.Save(context.Background(), book)
 	if err != nil {
 		t.Errorf("Expected no error, got %v", err)
 	}

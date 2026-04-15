@@ -5,14 +5,13 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/sawakishuto/go_practice/internal/adapter/memory"
 	"github.com/sawakishuto/go_practice/internal/domain/book"
 )
 
 func TestShelfService_Register_Borrow_Return_flow(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	repo := memory.NewBookRepository()
+	repo := NewFakeBookRepository()
 	svc := NewShelfService(repo)
 
 	id, err := svc.RegisterBook(ctx, "The Great Gatsby", "F. Scott Fitzgerald")
@@ -65,7 +64,7 @@ func TestShelfService_Register_Borrow_Return_flow(t *testing.T) {
 func TestShelfService_BorrowBook_unknown_id(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	svc := NewShelfService(memory.NewBookRepository())
+	svc := NewShelfService(NewFakeBookRepository())
 
 	if err := svc.BorrowBook(ctx, "no-such-id"); !errors.Is(err, book.BookNotFound) {
 		t.Fatalf("got %v, want BookNotFound", err)

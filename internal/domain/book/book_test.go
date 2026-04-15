@@ -9,7 +9,12 @@ import (
 func TestBook_Borrow_and_Return_lifecycle(t *testing.T) {
 	t.Parallel()
 
-	b := NewBook("1", "The Great Gatsby", "F. Scott Fitzgerald")
+	var title, err = NewTitle("The Great Gatsby")
+	if err != nil {
+		t.Fatalf("thin book title is invalid")
+	}
+
+	b := NewBook("1", title, "F. Scott Fitzgerald")
 
 	// 1. 新しい本は貸出可能であること。
 	if !b.IsAvailable() {
@@ -25,7 +30,7 @@ func TestBook_Borrow_and_Return_lifecycle(t *testing.T) {
 	}
 
 	// 3. もう一度 Borrow すると AlreadyBorrowed になること（errors.Is で検証）。
-	err := b.Borrow()
+	err = b.Borrow()
 	if !errors.Is(err, AlreadyBorrowed) {
 		t.Fatalf("second Borrow: got %v, want errors.Is(..., AlreadyBorrowed)", err)
 	}

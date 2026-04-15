@@ -9,4 +9,7 @@ var (
 	NotBorrowed = errors.New("book: not borrowed")
 	// BookNotFound はリポジトリが本を見つけられないときに返す（Step 3 以降で使用）。
 	BookNotFound = errors.New("book: not found")
+
+	ErrBookTitleTooLong = errors.New("book title too long")
+	BadTitle = errors.New("book title is bad")
 )
