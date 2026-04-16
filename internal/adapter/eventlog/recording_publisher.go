@@ -22,5 +22,16 @@ func (r *RecordingPublisher) Publish(ctx context.Context, event book.ShelfEvent)
 }
 
 func NewRecordingPublisher() *RecordingPublisher {
-	return &RecordingPublisher{}
+	return &RecordingPublisher{
+		events: make([]book.ShelfEvent, 0),
+	}
+}
+
+// Events は Publish されたイベントのコピーを返す（テストでの検証用）。
+func (r *RecordingPublisher) Events() []book.ShelfEvent {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]book.ShelfEvent, len(r.events))
+	copy(out, r.events)
+	return out
 }
