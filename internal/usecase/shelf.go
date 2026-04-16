@@ -14,11 +14,12 @@ import (
 type ShelfService struct {
 	repo Repository
 	evpub EventPublisher
+	evstore EventStore
 }
 
 // NewShelfService は ShelfService を構築する。
-func NewShelfService(repo Repository, evpub EventPublisher) *ShelfService {
-	return &ShelfService{repo: repo, evpub: evpub}
+func NewShelfService(repo Repository, evpub EventPublisher, evstore EventStore) *ShelfService {
+	return &ShelfService{repo: repo, evpub: evpub, evstore: evstore}
 }
 
 // RegisterBook は新しい本を登録し、採番した ID を返す。
@@ -49,17 +50,23 @@ func (s *ShelfService) RegisterBook(ctx context.Context, title, author string) (
 
 // BorrowBook は指定 ID の本を貸し出す。
 func (s *ShelfService) BorrowBook(ctx context.Context, bookID string, evpub EventPublisher) error {
+
 	b, err := s.repo.FindByID(ctx, bookID)
 	if err != nil {
 		return err
 	}
+
+	_ ,version, err := s.evstore.Load(ctx, bookID)
+	if err != nil {
+		return err
+	}
+
 	if err := b.Borrow(); err != nil {
 		return err
 	}
 
 	err = s.repo.Save(ctx, b)
 	if err != nil {
-		fmt.Errorf("Save error")
 		return err
 	}
 	event := &book.BookBorrowed{
@@ -67,7 +74,14 @@ func (s *ShelfService) BorrowBook(ctx context.Context, bookID string, evpub Even
 		OccurredAt: time.Now(),
 	}
 
-	s.evpub.Publish(ctx, event)
+	err = s.evstore.Append(ctx, bookID, version, event)
+	if err != nil {
+		return err
+	}
+	err = s.evpub.Publish(ctx, event)
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
