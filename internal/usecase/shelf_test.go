@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/sawakishuto/go_practice/internal/adapter/eventlog"
 	"github.com/sawakishuto/go_practice/internal/domain/book"
 )
 
@@ -12,7 +13,8 @@ func TestShelfService_Register_Borrow_Return_flow(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	repo := NewFakeBookRepository()
-	svc := NewShelfService(repo)
+	evpub := eventlog.NewRecordingPublisher()
+	svc := NewShelfService(repo, evpub)
 
 	id, err := svc.RegisterBook(ctx, "The Great Gatsby", "F. Scott Fitzgerald")
 	if err != nil {
@@ -30,7 +32,7 @@ func TestShelfService_Register_Borrow_Return_flow(t *testing.T) {
 		t.Fatal("new book should be available")
 	}
 
-	if err := svc.BorrowBook(ctx, id); err != nil {
+	if err := svc.BorrowBook(ctx, id, evpub); err != nil {
 		t.Fatalf("BorrowBook: %v", err)
 	}
 	b, err = repo.FindByID(ctx, id)
@@ -41,7 +43,7 @@ func TestShelfService_Register_Borrow_Return_flow(t *testing.T) {
 		t.Fatal("after borrow, book should not be available (repository returns a copy — refetch after Save)")
 	}
 
-	if err := svc.BorrowBook(ctx, id); !errors.Is(err, book.AlreadyBorrowed) {
+	if err := svc.BorrowBook(ctx, id, evpub); !errors.Is(err, book.AlreadyBorrowed) {
 		t.Fatalf("second BorrowBook: got %v, want AlreadyBorrowed", err)
 	}
 
@@ -64,9 +66,10 @@ func TestShelfService_Register_Borrow_Return_flow(t *testing.T) {
 func TestShelfService_BorrowBook_unknown_id(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	svc := NewShelfService(NewFakeBookRepository())
+	evpub := eventlog.NewRecordingPublisher()
+	svc := NewShelfService(NewFakeBookRepository(), evpub)
 
-	if err := svc.BorrowBook(ctx, "no-such-id"); !errors.Is(err, book.BookNotFound) {
+	if err := svc.BorrowBook(ctx, "no-such-id", evpub); !errors.Is(err, book.BookNotFound) {
 		t.Fatalf("got %v, want BookNotFound", err)
 	}
 }

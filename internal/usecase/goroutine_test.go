@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+
+	"github.com/sawakishuto/go_practice/internal/adapter/eventlog"
 )
 
 func TestMultiAccessFromUser(t *testing.T) {
 	repo := NewFakeBookRepository()
-	shelf := NewShelfService(repo)
+	evpub := eventlog.NewRecordingPublisher()
+	shelf := NewShelfService(repo, evpub)
 
 	var wg sync.WaitGroup
 

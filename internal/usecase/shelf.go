@@ -13,11 +13,12 @@ import (
 // ShelfService は蔵書まわりのユースケース（アプリケーションサービス）。
 type ShelfService struct {
 	repo Repository
+	evpub EventPublisher
 }
 
 // NewShelfService は ShelfService を構築する。
-func NewShelfService(repo Repository) *ShelfService {
-	return &ShelfService{repo: repo}
+func NewShelfService(repo Repository, evpub EventPublisher) *ShelfService {
+	return &ShelfService{repo: repo, evpub: evpub}
 }
 
 // RegisterBook は新しい本を登録し、採番した ID を返す。
@@ -42,11 +43,12 @@ func (s *ShelfService) RegisterBook(ctx context.Context, title, author string) (
 		Author:     b.Author(),
 		OccurredAt: time.Now(),
 	}
+	s.evpub.Publish(ctx, event)
 	return b.ID(), nil
 }
 
 // BorrowBook は指定 ID の本を貸し出す。
-func (s *ShelfService) BorrowBook(ctx context.Context, bookID string) error {
+func (s *ShelfService) BorrowBook(ctx context.Context, bookID string, evpub EventPublisher) error {
 	b, err := s.repo.FindByID(ctx, bookID)
 	if err != nil {
 		return err
@@ -64,6 +66,9 @@ func (s *ShelfService) BorrowBook(ctx context.Context, bookID string) error {
 		ID:         b.ID(),
 		OccurredAt: time.Now(),
 	}
+
+	s.evpub.Publish(ctx, event)
+
 	return nil
 }
 

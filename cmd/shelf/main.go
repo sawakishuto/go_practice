@@ -5,13 +5,15 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/sawakishuto/go_practice/internal/adapter/eventlog"
 	"github.com/sawakishuto/go_practice/internal/adapter/memory"
 	"github.com/sawakishuto/go_practice/internal/usecase"
 )
 
 func main() {
 	repo := memory.NewBookRepository()
-	shelf := usecase.NewShelfService(repo)
+	evpub := eventlog.NewRecordingPublisher()
+	shelf := usecase.NewShelfService(repo, evpub)
 
 	// 本を登録する
 	id, err := shelf.RegisterBook(context.Background(), "今日の本", "sawaki shuto")
@@ -21,7 +23,7 @@ func main() {
 	fmt.Println("今日登録した本は", id, "です")
 
 	// 本を借りる
-	err = shelf.BorrowBook(context.Background(), id)
+	err = shelf.BorrowBook(context.Background(), id, evpub)
 	if err != nil {
 		log.Fatalf("Failed to borrow book: %v", err)
 	}
