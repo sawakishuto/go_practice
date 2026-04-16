@@ -73,3 +73,31 @@ func TestShelfService_BorrowBook_unknown_id(t *testing.T) {
 		t.Fatalf("got %v, want BookNotFound", err)
 	}
 }
+
+func TestShelfService_BorrowBook_publishes_exactly_one_BookBorrowed(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	rec := eventlog.NewRecordingPublisher()
+	repo := NewFakeBookRepository()
+	svc := NewShelfService(repo, rec)
+
+	id, err := svc.RegisterBook(ctx, "Event Test", "Author")
+	if err != nil {
+		t.Fatalf("RegisterBook: %v", err)
+	}
+	if err := svc.BorrowBook(ctx, id, rec); err != nil {
+		t.Fatalf("BorrowBook: %v", err)
+	}
+
+	var borrowed int
+	for _, ev := range rec.Events() {
+		switch ev.(type) {
+		case *book.BookBorrowed:
+			borrowed++
+		default:
+		}
+	}
+	if borrowed != 1 {
+		t.Fatalf("BookBorrowed count: got %d, want 1 (events: %d)", borrowed, len(rec.Events()))
+	}
+}

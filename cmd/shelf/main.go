@@ -6,6 +6,7 @@ import (
 	"log"
 
 	"github.com/sawakishuto/go_practice/internal/adapter/eventlog"
+	"github.com/sawakishuto/go_practice/internal/adapter/eventstore"
 	"github.com/sawakishuto/go_practice/internal/adapter/memory"
 	"github.com/sawakishuto/go_practice/internal/usecase"
 )
@@ -13,7 +14,8 @@ import (
 func main() {
 	repo := memory.NewBookRepository()
 	evpub := eventlog.NewRecordingPublisher()
-	shelf := usecase.NewShelfService(repo, evpub)
+	evstore := eventstore.NewEventStore()
+	shelf := usecase.NewShelfService(repo, evpub, evstore)
 
 	// 本を登録する
 	id, err := shelf.RegisterBook(context.Background(), "今日の本", "sawaki shuto")
